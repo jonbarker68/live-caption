@@ -1,0 +1,24 @@
+[project]
+name = "live-caption"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Jon Barker", email = "j.p.barker@sheffield.ac.uk" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pyaudio>=0.2.14",
+    "pyobjc-framework-cocoa>=12.2.2",
+    "pyside6>=6.6.3.1",
+    "pyyaml>=6.0.3",
+    "speechmatics-python>=2.0.3",
+    "speechmatics-rt>=1.1.1",
+]
+
+[project.scripts]
+live-caption = "live_caption:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
