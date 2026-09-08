@@ -1,0 +1,11 @@
+speechmatics:
+  model: enhanced
+  language: en
+  max_delay: 0.7
+  enable_partials: true
+
+processing:
+  # Speechmatics marks recognised profanities in word-level result tags.
+  # When enabled, the caption processor masks those tagged words locally.
+  profanity_filter: true
+  profanity_replacement: "*"

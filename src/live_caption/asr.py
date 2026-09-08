@@ -57,10 +57,17 @@ def _jsonable(value):
 class SpeechmaticsWorker(threading.Thread):
     """Capture microphone audio and emit raw Speechmatics response events."""
 
-    def __init__(self, raw_events: queue.Queue, display_events: queue.Queue, record_path=None):
+    def __init__(
+        self,
+        raw_events: queue.Queue,
+        display_events: queue.Queue,
+        config: dict,
+        record_path=None,
+    ):
         super().__init__(name="speechmatics-worker", daemon=False)
         self.raw_events = raw_events
         self.display_events = display_events
+        self.config = config
         self.record_path = record_path
         self.stop_requested = threading.Event()
 
@@ -84,13 +91,8 @@ class SpeechmaticsWorker(threading.Thread):
             chunk_size=AUDIO_CHUNK_SIZE,
         )
 
-        config_values = {
-            "model": "enhanced",
-            "language": "en",
-            "max_delay": 0.7,
-            "enable_partials": True,
-        }
-        config = TranscriptionConfig(**config_values)
+        config_values = self.config["speechmatics"]
+        transcription_config = TranscriptionConfig(**config_values)
 
         recorder = None
         if self.record_path:
@@ -150,7 +152,7 @@ class SpeechmaticsWorker(threading.Thread):
                     emit("final", msg)
 
                 await client.start_session(
-                    transcription_config=config,
+                    transcription_config=transcription_config,
                     audio_format=audio_format,
                 )
 

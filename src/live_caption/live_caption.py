@@ -2,6 +2,7 @@ import argparse
 import queue
 
 from asr import SpeechmaticsWorker
+from config import load_config
 from overlay import run_overlay
 from processor import ProcessorWorker
 from recording import ReplayWorker
@@ -23,6 +24,11 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--config",
+        default="config.yaml",
+        help="local YAML configuration file (default: config.yaml)",
+    )
+    parser.add_argument(
         "--speed",
         type=float,
         default=1.0,
@@ -41,19 +47,26 @@ def parse_args():
 
 def main():
     args = parse_args()
+    config = load_config(args.config)
 
     raw_events = queue.Queue()
     display_events = queue.Queue()
 
-    processor = ProcessorWorker(raw_events, display_events)
+    processor = ProcessorWorker(raw_events, display_events, config)
 
     if args.replay:
         source = ReplayWorker(
-            args.replay, raw_events, display_events, speed=args.speed
+            args.replay,
+            raw_events,
+            display_events,
+            speed=args.speed,
         )
     else:
         source = SpeechmaticsWorker(
-            raw_events, display_events, record_path=args.record
+            raw_events,
+            display_events,
+            config,
+            record_path=args.record,
         )
 
     run_overlay(display_events, source, processor)
