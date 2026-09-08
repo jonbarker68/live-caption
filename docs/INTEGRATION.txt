@@ -1,0 +1,40 @@
+Overlay configuration integration
+=================================
+
+The new overlay.py changes:
+
+    run_overlay(events, source_worker, processor_worker)
+
+to:
+
+    run_overlay(events, source_worker, processor_worker, config)
+
+So in the current launcher, where the YAML configuration has already been
+loaded into `config`, change the existing call to:
+
+    run_overlay(display_events, source_worker, processor_worker, config)
+
+(or use the name of your display-event queue if it differs).
+
+No changes are required in asr.py or processor.py.
+
+Dedicated caption-screen example
+--------------------------------
+
+To use the whole visible display as an opaque caption screen:
+
+overlay:
+  mode: window
+  font_family: system
+  font_size: 48
+  font_weight: semibold
+  font_color: "#ffffff"
+  alignment: center
+  padding: 40
+  background_color: "#000000"
+  background_opacity: 1.0
+  shadow: false
+  max_context_chars: 500
+
+In window mode the geometry fields width_fraction, max_width, height,
+bottom_margin and position are ignored.

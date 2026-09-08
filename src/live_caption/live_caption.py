@@ -69,7 +69,7 @@ def main():
             record_path=args.record,
         )
 
-    run_overlay(display_events, source, processor)
+    run_overlay(display_events, source, processor, config)
 
 
 if __name__ == "__main__":
