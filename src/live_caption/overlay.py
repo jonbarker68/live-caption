@@ -1,5 +1,6 @@
 import queue
 import signal
+import time
 
 import objc
 from AppKit import (
@@ -9,9 +10,12 @@ from AppKit import (
     NSColor,
     NSFont,
     NSMakeRect,
+    NSMenu,
+    NSMenuItem,
     NSPanel,
     NSScreen,
     NSScreenSaverWindowLevel,
+    NSStatusBar,
     NSTextField,
     NSView,
     NSViewHeightSizable,
@@ -22,6 +26,7 @@ from AppKit import (
     NSWindowCollectionBehaviorStationary,
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
+    NSVariableStatusItemLength,
 )
 from Foundation import NSObject, NSTimer
 
@@ -148,46 +153,88 @@ class AppDelegate(NSObject):
     background = objc.ivar()
     label = objc.ivar()
     timer = objc.ivar()
+    status_item = objc.ivar()
+    toggle_item = objc.ivar()
+
+    session_factory = objc.ivar()
     source_worker = objc.ivar()
     processor_worker = objc.ivar()
     events = objc.ivar()
     config = objc.ivar()
     renderer = objc.ivar()
-    shutting_down = objc.ivar(type=objc._C_BOOL)
 
-    def initWithEvents_source_processor_config_(
-        self, events, source_worker, processor_worker, config
-    ):
+    captioning = objc.ivar(type=objc._C_BOOL)
+    stopping = objc.ivar(type=objc._C_BOOL)
+    quitting = objc.ivar(type=objc._C_BOOL)
+    hide_on_stop = objc.ivar(type=objc._C_BOOL)
+    settle_until = objc.ivar(type=objc._C_DBL)
+    quit_deadline = objc.ivar(type=objc._C_DBL)
+
+    def initWithSessionFactory_config_(self, session_factory, config):
         self = objc.super(AppDelegate, self).init()
         if self is None:
             return None
 
-        self.events = events
-        self.source_worker = source_worker
-        self.processor_worker = processor_worker
+        self.session_factory = session_factory
         self.config = _overlay_config(config)
-        self.renderer = make_renderer(
-            self.config["layout"],
-            self.config,
-        )
+        self.source_worker = None
+        self.processor_worker = None
+        self.events = None
+        self.renderer = None
+        self.captioning = False
+        self.stopping = False
+        self.quitting = False
+        self.hide_on_stop = True
+        self.settle_until = 0.0
+        self.quit_deadline = 0.0
         return self
 
     def applicationDidFinishLaunching_(self, notification):
-        self.shutting_down = False
-
         self._create_overlay()
-        self.processor_worker.start()
-        self.source_worker.start()
+        self._create_status_menu()
 
         self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.03, self, "processEvents:", None, True
         )
 
-        print(
-            f"Live captions running "
-            f"(layout={self.config['layout']}). Press Ctrl-C to stop.",
-            flush=True,
+        # Starting the app means starting captioning.
+        self.start_captioning()
+
+    def _create_status_menu(self):
+        status_bar = NSStatusBar.systemStatusBar()
+        self.status_item = status_bar.statusItemWithLength_(
+            NSVariableStatusItemLength
         )
+        self.status_item.button().setTitle_("CC")
+
+        menu = NSMenu.alloc().init()
+
+        self.toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Stop Captioning", "toggleCaptioning:", ""
+        )
+        self.toggle_item.setTarget_(self)
+        menu.addItem_(self.toggle_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Quit Live Caption", "quitApplication:", "q"
+        )
+        quit_item.setTarget_(self)
+        menu.addItem_(quit_item)
+
+        self.status_item.setMenu_(menu)
+
+    def _set_toggle_state(self):
+        if self.stopping:
+            self.toggle_item.setTitle_("Stopping…")
+            self.toggle_item.setEnabled_(False)
+        elif self.captioning:
+            self.toggle_item.setTitle_("Stop Captioning")
+            self.toggle_item.setEnabled_(True)
+        else:
+            self.toggle_item.setTitle_("Start Captioning")
+            self.toggle_item.setEnabled_(True)
 
     def _window_rect(self):
         screen = NSScreen.mainScreen().visibleFrame()
@@ -301,47 +348,162 @@ class AppDelegate(NSObject):
         self.content.addSubview_(self.background)
         self.content.addSubview_(self.label)
         self.panel.setContentView_(self.content)
-        self.panel.orderFrontRegardless()
 
     def _show_caption(self, text: str):
         self.label.setStringValue_(text or "Listening…")
 
-    @objc.IBAction
-    def processEvents_(self, timer):
-        while True:
-            try:
-                kind, text = self.events.get_nowait()
-            except queue.Empty:
-                break
-
-            if kind == "partial":
-                self._show_caption(self.renderer.update_partial(text))
-
-            elif kind == "final":
-                self._show_caption(self.renderer.add_final(text))
-
-            elif kind == "status":
-                print(text, flush=True)
-                if not self.renderer.current_text():
-                    self.label.setStringValue_(text)
-
-            elif kind == "error":
-                print(f"Live caption error: {text}", flush=True)
-                self.label.setStringValue_(f"Live caption error: {text}")
-                self.shutting_down = True
-                self.source_worker.stop()
-
-            elif kind == "pipeline_stopped":
-                NSApplication.sharedApplication().terminate_(None)
-
-    def requestShutdown(self):
-        if self.shutting_down:
+    def start_captioning(self):
+        if self.captioning or self.stopping or self.quitting:
             return
 
-        self.shutting_down = True
-        self.label.setStringValue_("Stopping…")
+        self.events, self.source_worker, self.processor_worker = (
+            self.session_factory()
+        )
+        self.renderer = make_renderer(
+            self.config["layout"],
+            self.config,
+        )
+
+        self.captioning = True
+        self.stopping = False
+        self.hide_on_stop = True
+        self.settle_until = 0.0
+        self.label.setStringValue_("Starting…")
+        self.panel.orderFrontRegardless()
+        self._set_toggle_state()
+
+        self.processor_worker.start()
+        self.source_worker.start()
+
+        print(
+            f"Live captions running (layout={self.config['layout']}).",
+            flush=True,
+        )
+
+    def stop_captioning(self, hide_overlay=True):
+        if not self.captioning:
+            return
+
+        if self.stopping:
+            if hide_overlay:
+                self.hide_on_stop = True
+                self.panel.orderOut_(None)
+            return
+
+        self.stopping = True
+        self.hide_on_stop = hide_overlay
+        self.settle_until = 0.0
+        self._set_toggle_state()
+
+        if hide_overlay:
+            self.panel.orderOut_(None)
+
         print("Stopping live captions…", flush=True)
-        self.source_worker.stop()
+        if self.source_worker is not None:
+            self.source_worker.stop()
+
+    @objc.IBAction
+    def toggleCaptioning_(self, sender):
+        if self.captioning:
+            self.stop_captioning(hide_overlay=True)
+        else:
+            self.start_captioning()
+
+    @objc.IBAction
+    def quitApplication_(self, sender):
+        self.requestShutdown()
+
+    @objc.IBAction
+    def processEvents_(self, timer):
+        # Drain only the event queue owned by the current pipeline. A new
+        # session is never created until these workers have fully exited.
+        if self.events is not None:
+            while True:
+                try:
+                    kind, text = self.events.get_nowait()
+                except queue.Empty:
+                    break
+
+                if kind == "partial":
+                    if not self.stopping:
+                        self._show_caption(self.renderer.update_partial(text))
+
+                elif kind == "final":
+                    if not self.stopping:
+                        self._show_caption(self.renderer.add_final(text))
+
+                elif kind == "status":
+                    print(text, flush=True)
+                    if (
+                        not self.stopping
+                        and self.renderer is not None
+                        and not self.renderer.current_text()
+                    ):
+                        self.label.setStringValue_(text)
+
+                elif kind == "error":
+                    print(f"Live caption error: {text}", flush=True)
+                    self.label.setStringValue_(f"Live caption error: {text}")
+                    self.stop_captioning(hide_overlay=False)
+
+                elif kind == "pipeline_stopped":
+                    # Do not clear worker references here. This only tells us
+                    # the processor consumed the source sentinel; the source
+                    # thread itself may still be unwinding CoreAudio/PyAudio.
+                    pass
+
+        now = time.monotonic()
+
+        if self.stopping:
+            source_done = (
+                self.source_worker is None or not self.source_worker.is_alive()
+            )
+            processor_done = (
+                self.processor_worker is None
+                or not self.processor_worker.is_alive()
+            )
+
+            if source_done and processor_done:
+                if self.settle_until == 0.0:
+                    # Give the microphone backend a brief chance to release
+                    # the device before Start Captioning is enabled again.
+                    self.settle_until = now + 0.25
+
+                if now >= self.settle_until:
+                    self.source_worker = None
+                    self.processor_worker = None
+                    self.events = None
+                    self.renderer = None
+                    self.captioning = False
+                    self.stopping = False
+                    self.settle_until = 0.0
+
+                    if self.quitting:
+                        NSApplication.sharedApplication().terminate_(None)
+                        return
+
+                    self._set_toggle_state()
+
+        # A stuck external library must never make the menu-bar app
+        # impossible to quit. After three seconds, terminate regardless.
+        if self.quitting and self.quit_deadline and now >= self.quit_deadline:
+            print(
+                "Caption worker did not stop promptly; forcing application quit.",
+                flush=True,
+            )
+            NSApplication.sharedApplication().terminate_(None)
+
+    def requestShutdown(self):
+        if self.quitting:
+            return
+
+        self.quitting = True
+        self.quit_deadline = time.monotonic() + 3.0
+
+        if self.captioning:
+            self.stop_captioning(hide_overlay=True)
+        else:
+            NSApplication.sharedApplication().terminate_(None)
 
     def applicationWillTerminate_(self, notification):
         if self.timer is not None:
@@ -358,12 +520,12 @@ class AppDelegate(NSObject):
             self.panel.orderOut_(None)
 
 
-def run_overlay(events, source_worker, processor_worker, config):
+def run_overlay(session_factory, config):
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
-    delegate = AppDelegate.alloc().initWithEvents_source_processor_config_(
-        events, source_worker, processor_worker, config
+    delegate = AppDelegate.alloc().initWithSessionFactory_config_(
+        session_factory, config
     )
     app.setDelegate_(delegate)
 

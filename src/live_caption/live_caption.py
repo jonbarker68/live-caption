@@ -1,11 +1,27 @@
 import argparse
 import queue
+from pathlib import Path
 
 from asr import SpeechmaticsWorker
 from config import load_config
 from overlay import run_overlay
 from processor import ProcessorWorker
 from recording import ReplayWorker
+
+
+def _default_config_path():
+    candidates = [
+        Path.home() / ".config" / "live-caption" / "config.yaml",
+        Path.cwd() / "config.yaml",
+        Path(__file__).resolve().parents[2] / "config.yaml",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return str(path)
+
+    # Give load_config() a useful path to mention if none exists.
+    return str(candidates[0])
 
 
 def parse_args():
@@ -25,8 +41,12 @@ def parse_args():
 
     parser.add_argument(
         "--config",
-        default="config.yaml",
-        help="local YAML configuration file (default: config.yaml)",
+        default=None,
+        help=(
+            "local YAML configuration file "
+            "(default: ~/.config/live-caption/config.yaml, "
+            "falling back to ./config.yaml)"
+        ),
     )
     parser.add_argument(
         "--speed",
@@ -47,29 +67,33 @@ def parse_args():
 
 def main():
     args = parse_args()
-    config = load_config(args.config)
+    config_path = args.config or _default_config_path()
+    config = load_config(config_path)
 
-    raw_events = queue.Queue()
-    display_events = queue.Queue()
+    def make_session():
+        raw_events = queue.Queue()
+        display_events = queue.Queue()
 
-    processor = ProcessorWorker(raw_events, display_events, config)
+        processor = ProcessorWorker(raw_events, display_events, config)
 
-    if args.replay:
-        source = ReplayWorker(
-            args.replay,
-            raw_events,
-            display_events,
-            speed=args.speed,
-        )
-    else:
-        source = SpeechmaticsWorker(
-            raw_events,
-            display_events,
-            config,
-            record_path=args.record,
-        )
+        if args.replay:
+            source = ReplayWorker(
+                args.replay,
+                raw_events,
+                display_events,
+                speed=args.speed,
+            )
+        else:
+            source = SpeechmaticsWorker(
+                raw_events,
+                display_events,
+                config,
+                record_path=args.record,
+            )
 
-    run_overlay(display_events, source, processor, config)
+        return display_events, source, processor
+
+    run_overlay(make_session, config)
 
 
 if __name__ == "__main__":
