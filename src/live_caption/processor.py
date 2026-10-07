@@ -1,7 +1,7 @@
 import re
 import threading
 
-from events import RawASREvent
+from .events import RawASREvent
 
 
 def _find_profanities(value):

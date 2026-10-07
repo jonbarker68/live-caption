@@ -1,5 +1,5 @@
-import asyncio
 import array
+import asyncio
 import dataclasses
 import os
 import queue
@@ -7,7 +7,6 @@ import threading
 import time
 
 import pyaudio
-
 from speechmatics.rt import (
     AsyncClient,
     AudioEncoding,
@@ -15,13 +14,12 @@ from speechmatics.rt import (
     AuthenticationError,
     Microphone,
     ServerMessageType,
-    TranscriptResult,
     TranscriptionConfig,
+    TranscriptResult,
 )
 
-from events import RawASREvent
-from recording import EventRecorder
-
+from .events import RawASREvent
+from .recording import EventRecorder
 
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHUNK_SIZE = 4096
@@ -74,9 +72,8 @@ def _find_input_device(pyaudio_instance, name):
         available = [
             pyaudio_instance.get_device_info_by_index(i)["name"]
             for i in range(pyaudio_instance.get_device_count())
-            if pyaudio_instance.get_device_info_by_index(i).get(
-                "maxInputChannels", 0
-            ) > 0
+            if pyaudio_instance.get_device_info_by_index(i).get("maxInputChannels", 0)
+            > 0
         ]
         raise RuntimeError(
             f"Audio input device {name!r} was not found. "
@@ -143,9 +140,7 @@ class MixedAudioInput:
         mic_config = audio_config.get("microphone", {})
         system_config = audio_config.get("system_audio", {})
 
-        self.microphone_name = mic_config.get(
-            "device", "MacBook Pro Microphone"
-        )
+        self.microphone_name = mic_config.get("device", "MacBook Pro Microphone")
         self.system_name = system_config.get("device", "BlackHole 2ch")
 
         self.pa = None
@@ -168,8 +163,7 @@ class MixedAudioInput:
             )
         if int(system_info.get("defaultSampleRate", 0)) != MIXED_INPUT_SAMPLE_RATE:
             raise RuntimeError(
-                f"{self.system_name!r} is not running at "
-                f"{MIXED_INPUT_SAMPLE_RATE} Hz."
+                f"{self.system_name!r} is not running at {MIXED_INPUT_SAMPLE_RATE} Hz."
             )
         if system_info.get("maxInputChannels", 0) < 2:
             raise RuntimeError(
@@ -305,9 +299,7 @@ class SpeechmaticsWorker(threading.Thread):
                         "encoding": "pcm_s16le",
                         "sample_rate": AUDIO_SAMPLE_RATE,
                         "chunk_size": AUDIO_CHUNK_SIZE,
-                        "mode": self.config.get("audio", {}).get(
-                            "mode", "microphone"
-                        ),
+                        "mode": self.config.get("audio", {}).get("mode", "microphone"),
                     },
                 },
             )
@@ -325,9 +317,7 @@ class SpeechmaticsWorker(threading.Thread):
         else:
             if recorder:
                 recorder.close()
-            raise RuntimeError(
-                "audio.mode must be either 'microphone' or 'mixed'"
-            )
+            raise RuntimeError("audio.mode must be either 'microphone' or 'mixed'")
 
         if not audio_source.start():
             if recorder:

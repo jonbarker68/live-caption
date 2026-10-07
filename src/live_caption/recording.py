@@ -3,7 +3,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from events import RawASREvent
+from .events import RawASREvent
 
 
 class EventRecorder:
@@ -15,12 +15,14 @@ class EventRecorder:
         self._file = self.path.open("w", encoding="utf-8")
         self._lock = threading.Lock()
 
-        self._write({
-            "type": "session",
-            "version": 1,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "metadata": metadata or {},
-        })
+        self._write(
+            {
+                "type": "session",
+                "version": 1,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": metadata or {},
+            }
+        )
 
     def _write(self, record: dict):
         with self._lock:

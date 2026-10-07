@@ -17,6 +17,7 @@ from AppKit import (
     NSScreenSaverWindowLevel,
     NSStatusBar,
     NSTextField,
+    NSVariableStatusItemLength,
     NSView,
     NSViewHeightSizable,
     NSViewWidthSizable,
@@ -26,12 +27,10 @@ from AppKit import (
     NSWindowCollectionBehaviorStationary,
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
-    NSVariableStatusItemLength,
 )
 from Foundation import NSObject, NSTimer
 
-from renderers import make_renderer
-
+from .renderers import make_renderer
 
 DEFAULT_OVERLAY_CONFIG = {
     "mode": "overlay",
@@ -89,8 +88,7 @@ def _overlay_config(config: dict) -> dict:
     weight = str(values["font_weight"]).lower()
     if weight not in FONT_WEIGHTS:
         raise ValueError(
-            "overlay.font_weight must be one of: "
-            + ", ".join(FONT_WEIGHTS)
+            "overlay.font_weight must be one of: " + ", ".join(FONT_WEIGHTS)
         )
     values["font_weight"] = weight
 
@@ -131,9 +129,7 @@ def _hex_color(value: str, alpha: float = 1.0):
     except ValueError as exc:
         raise ValueError(f"Invalid colour value #{value}") from exc
 
-    return NSColor.colorWithCalibratedRed_green_blue_alpha_(
-        red, green, blue, alpha
-    )
+    return NSColor.colorWithCalibratedRed_green_blue_alpha_(red, green, blue, alpha)
 
 
 def _font(family: str, size: float, weight: str):
@@ -193,8 +189,10 @@ class AppDelegate(NSObject):
         self._create_overlay()
         self._create_status_menu()
 
-        self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            0.03, self, "processEvents:", None, True
+        self.timer = (
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                0.03, self, "processEvents:", None, True
+            )
         )
 
         # Starting the app means starting captioning.
@@ -202,9 +200,7 @@ class AppDelegate(NSObject):
 
     def _create_status_menu(self):
         status_bar = NSStatusBar.systemStatusBar()
-        self.status_item = status_bar.statusItemWithLength_(
-            NSVariableStatusItemLength
-        )
+        self.status_item = status_bar.statusItemWithLength_(NSVariableStatusItemLength)
         self.status_item.button().setTitle_("CC")
 
         menu = NSMenu.alloc().init()
@@ -293,9 +289,7 @@ class AppDelegate(NSObject):
         )
         self.panel.setCollectionBehavior_(behavior)
 
-        self.content = NSView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, width, height)
-        )
+        self.content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
 
         self.background = NSTextField.alloc().initWithFrame_(
             NSMakeRect(0, 0, width, height)
@@ -311,9 +305,7 @@ class AppDelegate(NSObject):
             )
         )
         self.background.setStringValue_("")
-        self.background.setAutoresizingMask_(
-            NSViewWidthSizable | NSViewHeightSizable
-        )
+        self.background.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
         padding = float(self.config["padding"])
         text_width = max(1.0, width - 2 * padding)
@@ -336,9 +328,7 @@ class AppDelegate(NSObject):
             )
         )
         self.label.setStringValue_("Starting…")
-        self.label.setAutoresizingMask_(
-            NSViewWidthSizable | NSViewHeightSizable
-        )
+        self.label.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
         cell = self.label.cell()
         cell.setWraps_(True)
@@ -356,9 +346,7 @@ class AppDelegate(NSObject):
         if self.captioning or self.stopping or self.quitting:
             return
 
-        self.events, self.source_worker, self.processor_worker = (
-            self.session_factory()
-        )
+        self.events, self.source_worker, self.processor_worker = self.session_factory()
         self.renderer = make_renderer(
             self.config["layout"],
             self.config,
@@ -459,8 +447,7 @@ class AppDelegate(NSObject):
                 self.source_worker is None or not self.source_worker.is_alive()
             )
             processor_done = (
-                self.processor_worker is None
-                or not self.processor_worker.is_alive()
+                self.processor_worker is None or not self.processor_worker.is_alive()
             )
 
             if source_done and processor_done:

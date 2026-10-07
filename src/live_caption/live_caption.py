@@ -2,11 +2,11 @@ import argparse
 import queue
 from pathlib import Path
 
-from asr import SpeechmaticsWorker
-from config import load_config
-from overlay import run_overlay
-from processor import ProcessorWorker
-from recording import ReplayWorker
+from .asr import SpeechmaticsWorker
+from .config import load_config
+from .overlay import run_overlay
+from .processor import ProcessorWorker
+from .recording import ReplayWorker
 
 
 def _default_config_path():

@@ -1,15 +1,24 @@
 # Add this section to ~/.config/live-caption/config.yaml
 #
 # Existing behaviour:
-# audio:
-#   mode: microphone
+audio:
+  mode: microphone
 #
 # For conferencing / mixed local+remote captions:
-audio:
-  mode: mixed
+# audio:
+#  mode: mixed
+#
+#  microphone:
+#    device: "MacBook Pro Microphone"
+#
+#  system_audio:
+#    device: "BlackHole 2ch"
 
-  microphone:
-    device: "MacBook Pro Microphone"
+overlay:
+  layout: bbc
 
-  system_audio:
-    device: "BlackHole 2ch"
+bbc:
+  lines: 2
+  line_width: 36
+
+alignment: left
