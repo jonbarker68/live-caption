@@ -2,6 +2,7 @@
 from collections import deque
 from dataclasses import dataclass
 import math
+import re
 from typing import Callable
 
 
@@ -60,9 +61,31 @@ class LiveRenderer:
         self.layout = layout
         self.reset()
 
-    def _append(self, closed, current, text):
+    def _sentence_end(self, text):
+        # Deliberately conservative: only full stops, including before a
+        # closing quote/bracket. Avoid common titles, initials and ellipses.
+        token = text.split()[-1].rstrip('"\'”’)]}')
+        if not token.endswith('.') or token.endswith('..'):
+            return False
+        if token.lower() in {'mr.', 'mrs.', 'ms.', 'dr.', 'prof.', 'sr.', 'jr.',
+                             'st.', 'vs.', 'e.g.', 'i.e.'}:
+            return False
+        if re.fullmatch(r'(?:[A-Za-z]\.)+', token):
+            return False
+        return True
+
+    def _append(self, closed, current, text, *, final=False):
         breaks = 0
-        for word in text.split():
+        for index, word in enumerate(text.split()):
+            # The prefix is committed. Punctuation added within a partial
+            # is provisional and must not trigger an editorial break yet.
+            # Wait for the following word so a completed sentence alone
+            # does not create an empty line or premature scroll.
+            if (current and (final or index == 0) and self._sentence_end(current)
+                    and self.layout.measure(current) >= self.layout.width * 0.5):
+                closed.append(current)
+                breaks += 1
+                current = ''
             candidate = f'{current} {word}' if current else word
             if self.layout.fits(candidate):
                 current = candidate
@@ -99,7 +122,7 @@ class LiveRenderer:
         return '\n'.join([*closed, *([tail] if tail else [])][-self.lines:])
 
     def add_final(self, text):
-        self._open, added = self._append(self._closed, self._open, text)
+        self._open, added = self._append(self._closed, self._open, text, final=True)
         self._committed_breaks += added
         self.partial_text = ''
         self._has_partial = False

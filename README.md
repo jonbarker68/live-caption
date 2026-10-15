@@ -94,3 +94,11 @@ overlay:
 The outgoing line leaves through the clipped top edge as the incoming line enters from below. Updates arriving during that transition refresh the incoming text without restarting the animation. Corrections without clear line continuity and multi-line bursts snap directly to the latest text; animations are never queued, so they do not accumulate caption delay. The option has no effect on the original `bbc` or `rolling` modes.
 
 The shared renderer exposes `scroll_lines` alongside its unchanged string-returning methods: `1` means a one-line forward shift with retained text; `0` means an ordinary update, correction, or burst. Consumers that only use returned text continue working. Cadenza has no animation changes.
+
+### Full-stop-aware line breaks
+
+The shared `bbc_live` renderer starts the next sentence on a new line when a confirmed full stop ends a line that is at least 50% of the available text width. The threshold uses the display's font measurements (or character width for callers without measurements). Short sentences can still share a line. This applies within a final event and across subsequent events. A sentence ending alone does not create a blank line: the break happens when more words arrive.
+
+Provisional punctuation inside partial recognition results does not trigger these breaks until confirmed. Partials following an already confirmed sentence ending respect that boundary. Only full stops trigger the rule; commas, question marks and exclamation marks do not. Common titles, initials, initialisms and ellipses are excluded using a conservative heuristic, not a complete linguistic sentence detector. Full stops before closing quotes or brackets are recognised.
+
+Cadenza imports this shared renderer, so restarting Cadenza (in its default `bbc_live` mode) picks up the new behaviour automatically. No Cadenza code or configuration changes are needed. Original `bbc` and `rolling` modes retain their old wrapping.

@@ -82,6 +82,58 @@ class LiveRendererTests(unittest.TestCase):
         r.add_final('a large burst of completely new confirmed words arriving at once')
         self.assertEqual(r.scroll_lines, 0)
 
+    def test_full_stop_breaks_at_half_width_in_same_or_later_final(self):
+        r = self.renderer(width=20)
+        self.assertEqual(r.add_final('Hello all. Next'), 'Hello all.\nNext')
+        r.reset()
+        self.assertEqual(r.add_final('Hello all.'), 'Hello all.')
+        self.assertEqual(r.add_final('Next'), 'Hello all.\nNext')
+
+    def test_short_sentence_and_other_punctuation_stay_inline(self):
+        r = self.renderer(width=40)
+        self.assertEqual(r.add_final('Hi. Welcome'), 'Hi. Welcome')
+        for phrase in ('Hello everyone! Next', 'Hello everyone? Next', 'Hello everyone, next'):
+            r.reset()
+            self.assertEqual(r.add_final(phrase), phrase)
+
+    def test_sentence_threshold_uses_font_measurements(self):
+        measure = lambda text: sum(5 if c == 'W' else 1 for c in text)
+        r = LiveRenderer({}, layout=TextLayout(30, measure))
+        # Eight characters, but 20 units wide: more than half the line.
+        self.assertEqual(r.add_final('WWW end. Next'), 'WWW end.\nNext')
+
+    def test_provisional_stop_does_not_break_until_confirmed(self):
+        r = self.renderer(width=30)
+        phrase = 'Hello everyone. Next'
+        self.assertEqual(r.update_partial(phrase), phrase)
+        self.assertEqual(r.update_partial('Hello everyone next'), 'Hello everyone next')
+        self.assertEqual(r.add_final(phrase), 'Hello everyone.\nNext')
+
+    def test_partial_respects_previously_committed_full_stop(self):
+        r = self.renderer(width=30)
+        r.add_final('Hello everyone.')
+        self.assertEqual(r.update_partial('Next'), 'Hello everyone.\nNext')
+        self.assertEqual(r.add_final('Next'), 'Hello everyone.\nNext')
+        self.assertEqual(r.scroll_lines, 0)
+
+    def test_abbreviations_decimals_and_ellipses_are_not_sentence_breaks(self):
+        r = self.renderer(width=40)
+        for phrase in ('The speaker is Dr. Smith', 'Speak to J. Smith',
+                       'He lives in the U.K. today', 'The value is 3.14 today',
+                       'We are waiting... quietly'):
+            r.reset()
+            self.assertEqual(r.add_final(phrase), phrase)
+
+    def test_full_stop_before_closing_quote_and_sentence_scroll(self):
+        r = self.renderer(width=30)
+        self.assertEqual(r.add_final('He said "Hello." Next'), 'He said "Hello."\nNext')
+        r.reset()
+        r.add_final('Hello everyone. Another sentence.')
+        self.assertEqual(r.add_final('Next'), 'Another sentence.\nNext')
+        self.assertEqual(r.scroll_lines, 1)
+        r.reset()
+        self.assertEqual(r.add_final('Fresh words'), 'Fresh words')
+
     def test_single_line_viewport(self):
         r = self.renderer(lines=1)
         self.assertEqual(r.add_final('one two three'), 'three')
@@ -111,7 +163,7 @@ class LiveRendererTests(unittest.TestCase):
             self.assertLessEqual(len(output.splitlines()), 2)
             self.assertTrue(all(len(line) <= 36 for line in output.splitlines()))
         self.assertTrue(partial_seen and final_seen)
-        self.assertIn('Thank you for taking part.', r.current_text())
+        self.assertIn('Thank you for taking part.', ' '.join(r.current_text().split()))
 
     def test_invalid_measurement_or_width(self):
         for width in (0, -1, float('nan'), float('inf')):
