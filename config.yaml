@@ -15,7 +15,9 @@ audio:
 #    device: "BlackHole 2ch"
 
 overlay:
-  layout: bbc
+  layout: bbc_live   # or bbc
+  font_size: 36
+  scroll_duration_ms: 180
 
 bbc:
   lines: 2

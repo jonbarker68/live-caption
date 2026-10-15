@@ -16,3 +16,8 @@ class CaptionRenderer(ABC):
     def current_text(self) -> str:
         """Return the current display text."""
         raise NotImplementedError
+
+    @abstractmethod
+    def reset(self) -> None:
+        """Discard all committed and provisional text between sections."""
+        raise NotImplementedError

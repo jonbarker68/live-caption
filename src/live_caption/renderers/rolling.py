@@ -4,6 +4,11 @@ class RollingRenderer:
         self.final_text = ""
         self.partial_text = ""
 
+    def reset(self):
+        """Discard all committed and provisional caption text."""
+        self.final_text = ""
+        self.partial_text = ""
+
     def update_partial(self, text: str) -> str:
         self.partial_text = text
         return self.current_text()

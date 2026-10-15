@@ -1,0 +1,12 @@
+{"type": "asr", "t": 0.3, "kind": "partial", "text": "Welcome to the"}
+{"type": "asr", "t": 1, "kind": "partial", "text": "Welcome to the Cadenza concert."}
+{"type": "asr", "t": 2, "kind": "final", "text": "Welcome to the Cadenza concert."}
+{"type": "asr", "t": 3, "kind": "partial", "text": "Please turn to page seven in your"}
+{"type": "asr", "t": 3.8, "kind": "partial", "text": "Please turn to page seven in your booklet."}
+{"type": "asr", "t": 4.6, "kind": "final", "text": "Please turn to page seven in your booklet."}
+{"type": "asr", "t": 5.2, "kind": "partial", "text": "We will listen to the caption"}
+{"type": "asr", "t": 6, "kind": "partial", "text": "We will listen to the orchestra"}
+{"type": "asr", "t": 7, "kind": "final", "text": "We will listen to the orchestra together."}
+{"type": "asr", "t": 10, "kind": "partial", "text": "After the music, please complete your responses."}
+{"type": "asr", "t": 11, "kind": "final", "text": "After the music, please complete your responses."}
+{"type": "asr", "t": 12, "kind": "final", "text": "There are no right or wrong answers. Thank you for taking part."}

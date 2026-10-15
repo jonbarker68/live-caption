@@ -1,3 +1,4 @@
+import math
 import queue
 import signal
 import time
@@ -9,6 +10,9 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSColor,
     NSFont,
+    NSFontAttributeName,
+    NSLayoutManager,
+    NSLineBreakByClipping,
     NSMakeRect,
     NSMenu,
     NSMenuItem,
@@ -28,9 +32,9 @@ from AppKit import (
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
 )
-from Foundation import NSObject, NSTimer
+from Foundation import NSObject, NSTimer, NSString
 
-from .renderers import make_renderer
+from .renderers import make_renderer, TextLayout
 
 DEFAULT_OVERLAY_CONFIG = {
     "mode": "overlay",
@@ -50,6 +54,7 @@ DEFAULT_OVERLAY_CONFIG = {
     "padding": 18.0,
     "shadow": True,
     "max_context_chars": 180,
+    "scroll_duration_ms": 180,
 }
 
 FONT_WEIGHTS = {
@@ -69,6 +74,10 @@ ALIGNMENTS = {
 def _overlay_config(config: dict) -> dict:
     values = dict(DEFAULT_OVERLAY_CONFIG)
     values.update(config.get("overlay", {}))
+    # Renderer settings live beside overlay in the full configuration.
+    values["bbc"] = dict(config.get("bbc", {}))
+    if values["layout"] == "bbc_live" and "alignment" not in config.get("overlay", {}):
+        values["alignment"] = "left"
 
     mode = str(values["mode"]).lower()
     if mode not in {"overlay", "window"}:
@@ -108,6 +117,13 @@ def _overlay_config(config: dict) -> dict:
     if int(values["max_context_chars"]) <= 0:
         raise ValueError("overlay.max_context_chars must be greater than zero")
 
+    duration = values["scroll_duration_ms"]
+    if isinstance(duration, bool):
+        raise ValueError("overlay.scroll_duration_ms must be a number from 0 to 1000")
+    duration = float(duration)
+    if not math.isfinite(duration) or not 0 <= duration <= 1000:
+        raise ValueError("overlay.scroll_duration_ms must be a number from 0 to 1000")
+    values["scroll_duration_ms"] = duration
     return values
 
 
@@ -158,6 +174,10 @@ class AppDelegate(NSObject):
     events = objc.ivar()
     config = objc.ivar()
     renderer = objc.ivar()
+    scroll_view = objc.ivar()
+    scroll_state = objc.ivar()
+    last_caption = objc.ivar()
+    line_height = objc.ivar(type=objc._C_DBL)
 
     captioning = objc.ivar(type=objc._C_BOOL)
     stopping = objc.ivar(type=objc._C_BOOL)
@@ -177,6 +197,10 @@ class AppDelegate(NSObject):
         self.processor_worker = None
         self.events = None
         self.renderer = None
+        self.scroll_view = None
+        self.scroll_state = None
+        self.last_caption = ''
+        self.line_height = 0.0
         self.captioning = False
         self.stopping = False
         self.quitting = False
@@ -191,7 +215,7 @@ class AppDelegate(NSObject):
 
         self.timer = (
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                0.03, self, "processEvents:", None, True
+                1.0 / 60.0, self, "processEvents:", None, True
             )
         )
 
@@ -248,6 +272,13 @@ class AppDelegate(NSObject):
             screen.size.width * float(self.config["width_fraction"]),
         )
         height = min(float(self.config["height"]), screen.size.height)
+        if self.config["layout"] == "bbc_live":
+            font = _font(str(self.config["font_family"]), self.config["font_size"], self.config["font_weight"])
+            line_height = NSLayoutManager.alloc().init().defaultLineHeightForFont_(font)
+            needed = line_height * int(self.config["bbc"].get("lines", 2)) + 2 * float(self.config["padding"])
+            if needed > screen.size.height:
+                raise ValueError("Caption lines do not fit on this screen at the configured font size")
+            height = max(height, needed)
         x = screen.origin.x + (screen.size.width - width) / 2.0
 
         position = self.config["position"]
@@ -331,26 +362,105 @@ class AppDelegate(NSObject):
         self.label.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
         cell = self.label.cell()
-        cell.setWraps_(True)
+        cell.setWraps_(self.config["layout"] != "bbc_live")
+        if self.config["layout"] == "bbc_live":
+            cell.setLineBreakMode_(NSLineBreakByClipping)
+            self.label.setMaximumNumberOfLines_(int(self.config["bbc"].get("lines", 2)))
         cell.setScrollable_(False)
         cell.setUsesSingleLineMode_(False)
 
         self.content.addSubview_(self.background)
-        self.content.addSubview_(self.label)
+        if self.config["layout"] == "bbc_live":
+            self.line_height = NSLayoutManager.alloc().init().defaultLineHeightForFont_(self.label.font())
+            viewport_height = self.line_height * int(self.config["bbc"].get("lines", 2)) + 4
+            self.scroll_view = NSView.alloc().initWithFrame_(
+                NSMakeRect(padding, padding + text_height - viewport_height, text_width, viewport_height))
+            self.scroll_view.setWantsLayer_(True)
+            self.scroll_view.layer().setMasksToBounds_(True)
+            self.label.setFrame_(NSMakeRect(0, 0, text_width, viewport_height))
+            self.scroll_view.addSubview_(self.label)
+            self.content.addSubview_(self.scroll_view)
+        else:
+            self.content.addSubview_(self.label)
         self.panel.setContentView_(self.content)
 
-    def _show_caption(self, text: str):
-        self.label.setStringValue_(text or "Listening…")
+    @objc.python_method
+    def _show_caption(self, text: str, scroll_lines=0):
+        text = text or "Listening…"
+        old_lines = self.last_caption.splitlines()
+        new_lines = text.splitlines()
+        duration = self.config["scroll_duration_ms"] / 1000.0
+        if self.scroll_state is not None:
+            # Words arriving during a scroll update its incoming lines in
+            # place. A second scroll/correction snaps to the latest state,
+            # rather than queueing animations and falling behind speech.
+            state = self.scroll_state
+            if not scroll_lines and new_lines and state['target'].splitlines()[0] == new_lines[0]:
+                state['target'] = text
+                self.label.setStringValue_(state['outgoing'] + '\n' + text)
+                self.last_caption = text
+                return
+            self._finish_scroll()
+            self.label.setStringValue_(text)
+            self.last_caption = text
+            return
+        if self.scroll_view is not None and duration and scroll_lines == 1 and old_lines:
+            self.scroll_state = dict(start=time.monotonic(), duration=duration,
+                                     outgoing=old_lines[0], target=text)
+            self.label.setMaximumNumberOfLines_(int(self.config['bbc'].get('lines', 2)) + 1)
+            self.label.setStringValue_(old_lines[0] + '\n' + text)
+            self.last_caption = text
+            self._advance_scroll(self.scroll_state['start'])
+        else:
+            self.label.setStringValue_(text)
+            self.last_caption = text
+
+    @objc.python_method
+    def _advance_scroll(self, now):
+        if self.scroll_state is None:
+            return
+        state = self.scroll_state
+        progress = min(1.0, max(0.0, (now - state['start']) / state['duration']))
+        if progress >= 1.0:
+            self._finish_scroll()
+            return
+        # Smoothstep eases both ends while keeping the transition brief.
+        eased = progress * progress * (3 - 2 * progress)
+        bounds = self.scroll_view.bounds()
+        self.label.setFrame_(NSMakeRect(0, -self.line_height * (1 - eased),
+                                       bounds.size.width, bounds.size.height + self.line_height))
+
+    def _finish_scroll(self):
+        if self.scroll_state is None:
+            return
+        text = self.scroll_state['target']
+        self.scroll_state = None
+        self.label.setFrame_(self.scroll_view.bounds())
+        self.label.setMaximumNumberOfLines_(int(self.config['bbc'].get('lines', 2)))
+        self.label.setStringValue_(text)
+
+    def _create_renderer(self):
+        layout = None
+        if self.config["layout"] == "bbc_live":
+            font = self.label.font()
+            def measure(text):
+                return NSString.stringWithString_(text).sizeWithAttributes_({NSFontAttributeName: font}).width
+            # NSTextFieldCell reserves a small inset beyond the label frame.
+            layout = TextLayout(max(1, self.label.bounds().size.width - 8), measure)
+        return make_renderer(
+            self.config["layout"],
+            self.config,
+            layout=layout,
+        )
 
     def start_captioning(self):
         if self.captioning or self.stopping or self.quitting:
             return
 
+        self._finish_scroll()
+        self.last_caption = ''
+        self.renderer = self._create_renderer()
         self.events, self.source_worker, self.processor_worker = self.session_factory()
-        self.renderer = make_renderer(
-            self.config["layout"],
-            self.config,
-        )
 
         self.captioning = True
         self.stopping = False
@@ -369,6 +479,7 @@ class AppDelegate(NSObject):
         )
 
     def stop_captioning(self, hide_overlay=True):
+        self._finish_scroll()
         if not self.captioning:
             return
 
@@ -414,11 +525,11 @@ class AppDelegate(NSObject):
 
                 if kind == "partial":
                     if not self.stopping:
-                        self._show_caption(self.renderer.update_partial(text))
+                        self._show_caption(self.renderer.update_partial(text), getattr(self.renderer, "scroll_lines", 0))
 
                 elif kind == "final":
                     if not self.stopping:
-                        self._show_caption(self.renderer.add_final(text))
+                        self._show_caption(self.renderer.add_final(text), getattr(self.renderer, "scroll_lines", 0))
 
                 elif kind == "status":
                     print(text, flush=True)
@@ -431,6 +542,7 @@ class AppDelegate(NSObject):
 
                 elif kind == "error":
                     print(f"Live caption error: {text}", flush=True)
+                    self._finish_scroll()
                     self.label.setStringValue_(f"Live caption error: {text}")
                     self.stop_captioning(hide_overlay=False)
 
@@ -441,6 +553,7 @@ class AppDelegate(NSObject):
                     pass
 
         now = time.monotonic()
+        self._advance_scroll(now)
 
         if self.stopping:
             source_done = (

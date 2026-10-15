@@ -55,6 +55,9 @@ def parse_args():
         help="replay speed multiplier (default: 1.0)",
     )
 
+    parser.add_argument("--layout", choices=("rolling", "bbc", "bbc_live"),
+                        help="override overlay.layout for this run")
+
     args = parser.parse_args()
 
     if args.speed <= 0:
@@ -69,6 +72,8 @@ def main():
     args = parse_args()
     config_path = args.config or _default_config_path()
     config = load_config(config_path)
+    if args.layout:
+        config.setdefault("overlay", {})["layout"] = args.layout
 
     def make_session():
         raw_events = queue.Queue()

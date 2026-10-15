@@ -1,9 +1,13 @@
 from .bbc import BBCRenderer
+from .live import LiveRenderer
 from .rolling import RollingRenderer
 
 
-def make_renderer(name: str, config: dict):
+def make_renderer(name: str, config: dict, *, layout=None):
     name = str(name).strip().lower()
+
+    if name == "bbc_live":
+        return LiveRenderer(config, layout=layout)
 
     if name == "rolling":
         return RollingRenderer(config)
@@ -13,5 +17,5 @@ def make_renderer(name: str, config: dict):
 
     raise ValueError(
         f"Unknown overlay layout {name!r}. "
-        "Available layouts: rolling, bbc"
+        "Available layouts: rolling, bbc, bbc_live"
     )
