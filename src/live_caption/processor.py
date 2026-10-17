@@ -2,6 +2,7 @@ import re
 import threading
 
 from .events import RawASREvent
+from .config import resolve_config
 
 
 def _find_profanities(value):
@@ -25,39 +26,54 @@ def _find_profanities(value):
             yield from _find_profanities(child)
 
 
-def _mask_profanity(text: str, payload, replacement: str) -> str:
-    """Mask words explicitly tagged as profanity by Speechmatics."""
-    profanities = list(dict.fromkeys(_find_profanities(payload)))
+# Whole words only: do not block innocent substrings (e.g. Scunthorpe,
+# assessment). Tags cover other languages/terms; this English fallback also
+# handles untagged partials, recordings and ASR mistakes. It is not exhaustive.
+DEFAULT_PROFANITIES = frozenset("""
+ass asses arse arses arsehole arseholes asshole assholes bastard bastards bitch bitches
+bitching bloody bollock bollocks bugger buggers buggery bullshit bullshitting
+cock cocks cocksucker cocksuckers crap crappy cunt cunts damn
+damned goddamn goddamned hell horseshit dick dicks dickhead dickheads fuck fucks fucked fucking fucker fuckers
+motherfucker motherfuckers motherfucking piss pissed pissing prick pricks
+shit shits shitty shitting shite shithead shitheads twat twats wank wanker wankers wanking
+""".split())
 
-    for word in profanities:
-        mask = replacement * max(1, len(word))
-        pattern = rf"(?<!\w){re.escape(word)}(?!\w)"
-        text = re.sub(pattern, mask, text, flags=re.IGNORECASE)
 
-    return text
+def _normalise_word(word):
+    return word.casefold().replace("’", "'")
 
 
 class CaptionProcessor:
-    """Convert raw ASR events into display events."""
+    """Shared, stateless processing before layout for every ASR hypothesis."""
 
     def __init__(self, config: dict):
-        processing = config["processing"]
-        self.profanity_filter = processing["profanity_filter"]
-        self.profanity_replacement = processing["profanity_replacement"]
+        settings = resolve_config(config)["processing"]["profanity"]
+        self.mode = settings["mode"]
+        self.words = DEFAULT_PROFANITIES | {_normalise_word(w.strip()) for w in settings["additional_words"]}
+        self.allowed = {_normalise_word(w.strip()) for w in settings["allow_words"]}
 
     def process(self, event: RawASREvent):
-        if event.kind not in {"partial", "final"} or not event.text:
+        if event.kind not in {"partial", "final"}:
             return None
-
         text = event.text
-
-        if self.profanity_filter:
-            text = _mask_profanity(
-                text,
-                event.payload,
-                self.profanity_replacement,
-            )
-
+        if self.mode == "omit" and text:
+            words = self.words | {_normalise_word(w) for w in _find_profanities(event.payload)}
+            words -= self.allowed
+            if words:
+                # Longest phrases first. Include possessives and immediately
+                # attached punctuation so omitted-only utterances leave no marks.
+                terms = "|".join(re.escape(w).replace("'", "['’]") for w in sorted(words, key=len, reverse=True))
+                pattern = rf"(?<!\w)(?:{terms})(?:['’]s)?(?!\w)[,;:.!?]*"
+                filtered = re.sub(pattern, "", text, flags=re.IGNORECASE)
+                if filtered != text:
+                    text = " ".join(filtered.split())
+                    text = re.sub(r"\s+([,;:.!?])", r"\1", text)
+                    text = re.sub(r"[\(\[\{\"'“‘]\s*[\)\]\}\"'”’]", "", text)
+                    text = " ".join(text.split())
+                    if not any(c.isalnum() for c in text):
+                        text = ""
+        # Empty updates are meaningful: clear a provisional hypothesis even
+        # when the new partial/final consists entirely of omitted words.
         return (event.kind, text)
 
 

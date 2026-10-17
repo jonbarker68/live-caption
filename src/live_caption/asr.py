@@ -336,9 +336,6 @@ class SpeechmaticsWorker(threading.Thread):
                 def emit(kind, msg):
                     result = TranscriptResult.from_message(msg)
                     text = result.metadata.transcript
-                    if not text:
-                        return
-
                     event = RawASREvent(
                         t=time.monotonic() - live_time,
                         kind=kind,

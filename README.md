@@ -71,7 +71,7 @@ renderer.reset()
 
 Measurement callbacks run on the caller's thread; call the renderer from the UI thread when using native font APIs. `set_layout(new_layout)` clears history deliberately so old speech is not replayed following a display change. Without a `TextLayout`, wrapping uses `bbc.line_width` characters (default 36).
 
-Cadenza has not been migrated: it still requests `bbc`, and continues using the original renderer. Switching it to `bbc_live` later will also require supplying its Qt font measurements and disabling its second wrapping pass.
+Cadenza uses the shared renderer with its own Qt font measurements.
 
 ### Checks
 
@@ -93,7 +93,7 @@ overlay:
 
 The outgoing line leaves through the clipped top edge as the incoming line enters from below. Updates arriving during that transition refresh the incoming text without restarting the animation. Corrections without clear line continuity and multi-line bursts snap directly to the latest text; animations are never queued, so they do not accumulate caption delay. The option has no effect on the original `bbc` or `rolling` modes.
 
-The shared renderer exposes `scroll_lines` alongside its unchanged string-returning methods: `1` means a one-line forward shift with retained text; `0` means an ordinary update, correction, or burst. Consumers that only use returned text continue working. Cadenza has no animation changes.
+The shared renderer exposes `scroll_lines` alongside its unchanged string-returning methods: `1` means a one-line forward shift with retained text; `0` means an ordinary update, correction, or burst. Consumers that only use returned text continue working. Cadenza uses the same scroll signal with its own presentation animation.
 
 ### Full-stop-aware line breaks
 
@@ -102,3 +102,58 @@ The shared `bbc_live` renderer starts the next sentence on a new line when a con
 Provisional punctuation inside partial recognition results does not trigger these breaks until confirmed. Partials following an already confirmed sentence ending respect that boundary. Only full stops trigger the rule; commas, question marks and exclamation marks do not. Common titles, initials, initialisms and ellipses are excluded using a conservative heuristic, not a complete linguistic sentence detector. Full stops before closing quotes or brackets are recognised.
 
 Cadenza imports this shared renderer, so restarting Cadenza (in its default `bbc_live` mode) picks up the new behaviour automatically. No Cadenza code or configuration changes are needed. Original `bbc` and `rolling` modes retain their old wrapping.
+
+## Shared caption configuration and profanity handling
+
+Both apps use `live_caption.config.load_config` / `resolve_config` and
+`live_caption.processor.CaptionProcessor` from the live-caption checkout.
+Speechmatics and replay events are processed before text measurement/wrapping.
+Cadenza applies this in its bridge for both `--raw` (processed hypotheses) and
+legacy rendered output; the presentation does not implement a second filter.
+Use the same YAML file in both apps to share audio, Speechmatics, processing,
+`overlay`, and `bbc` settings. Unknown/existing settings are preserved.
+
+```yaml
+processing:
+  profanity:
+    mode: omit
+    additional_words: []
+    allow_words: []
+```
+
+`omit` is the default when no profanity settings are supplied. It removes whole
+words tagged as profanity by Speechmatics, plus a built-in English list including
+common inflections even when tags are absent (e.g. a spurious ASR hypothesis).
+Matching is case-insensitive and respects word boundaries, so `assessment` and
+`Scunthorpe` are retained. `additional_words` adds whole words or phrases;
+`allow_words` permits exact terms, including tagged terms. The English list lives
+in `live_caption/processor.py` as `DEFAULT_PROFANITIES`; it is not an exhaustive
+multilingual or obfuscated-profanity detector. Partial word fragments that do not
+yet match a complete term are not guessed or delayed.
+
+Set `mode: off` to show ASR output verbatim. The old
+`processing.profanity_filter: false` remains an explicit opt-out; `true` now
+means omission. An explicit `processing.profanity` mapping takes precedence over
+the old flag. `profanity_replacement` is accepted for compatibility but ignored;
+there is no masking/bleeping mode. Remove the legacy false flag to adopt the new
+default, or explicitly select `mode: omit`.
+
+Each partial replaces the preceding provisional hypothesis; every final commits
+only its newly recognised clean text. Empty/fully omitted updates still clear
+provisional text while retaining earlier committed speech. Omission removes
+attached punctuation and empty quote/bracket pairs and closes whitespace gaps.
+Filtering precedes all three renderers (`bbc_live`, `bbc`, `rolling`), so omitted
+words consume no layout width. Font, alignment, line count, line width, measured
+wrapping and animation settings keep their existing meanings. Cadenza retains
+its presentation font and CLI layout override.
+
+Raw `--record` JSONL files intentionally retain the original ASR text/payload,
+including any profanity; replay applies the current processing settings. The
+filter changes captions, not audio or recognition accuracy. Restart the app
+after changing settings.
+
+See `config.example.yaml` for a credential-free example. To share one local file:
+
+```sh
+uv run live-caption --config ~/.config/live-caption/config.yaml
+```

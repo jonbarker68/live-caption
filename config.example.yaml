@@ -1,0 +1,15 @@
+# Caption settings use live_caption.config's shared schema.
+# Merge this section into existing audio, Speechmatics and layout settings.
+processing:
+  profanity:
+    mode: omit  # omit (default) or off (show ASR text verbatim)
+    additional_words: []  # extra whole words or phrases, case-insensitive
+    allow_words: []  # exceptions, including terms tagged by Speechmatics
+
+overlay:
+  layout: bbc_live
+  alignment: left
+  scroll_duration_ms: 180
+bbc:
+  lines: 2
+  line_width: 36

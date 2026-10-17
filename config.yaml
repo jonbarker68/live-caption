@@ -15,7 +15,7 @@ audio:
 #    device: "BlackHole 2ch"
 
 overlay:
-  layout: bbc_live   # or bbc
+  layout: bbc_live # or bbc
   font_size: 36
   scroll_duration_ms: 180
 
@@ -24,3 +24,11 @@ bbc:
   line_width: 36
 
 alignment: left
+
+# Caption settings use live_caption.config's shared schema.
+# Merge this section into existing audio, Speechmatics and layout settings.
+processing:
+  profanity:
+    mode: omit  # omit (default) or off (show ASR text verbatim)
+    additional_words: []  # extra whole words or phrases, case-insensitive
+    allow_words: []  # exceptions, including terms tagged by Speechmatics
