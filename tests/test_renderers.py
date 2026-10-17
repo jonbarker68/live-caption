@@ -185,5 +185,105 @@ class LiveRendererTests(unittest.TestCase):
         self.assertEqual(make_renderer('bbc', {}).line_width, 36)
 
 
+class PauseBreakTests(unittest.TestCase):
+    def setUp(self):
+        self.now = 0.0
+
+    def renderer(self, *, threshold=2.0, width=40, lines=2):
+        return LiveRenderer({'bbc': {'pause_threshold_seconds': threshold, 'lines': lines}},
+                            layout=TextLayout(width), clock=lambda: self.now)
+
+    def test_short_line_starts_fresh_at_threshold_without_punctuation(self):
+        for ending in ('Hi', 'Hi.'):
+            with self.subTest(ending=ending):
+                self.now = 0
+                r = self.renderer()
+                r.add_final(ending)
+                self.now = 2.0
+                self.assertEqual(r.add_final('Welcome'), ending + '\nWelcome')
+
+    def test_short_gap_and_disabled_setting_extend_line(self):
+        for threshold, gap in ((2.0, 1.99), (0, 100)):
+            with self.subTest(threshold=threshold):
+                self.now = 0
+                r = self.renderer(threshold=threshold)
+                r.add_final('Hi.')
+                self.now = gap
+                self.assertEqual(r.add_final('Welcome'), 'Hi. Welcome')
+
+    def test_partial_boundary_survives_corrections_and_final_without_double_scroll(self):
+        r = self.renderer()
+        r.add_final('Old sentence. Another sentence.')
+        # Existing half-width punctuation break fills both line positions.
+        self.assertEqual(r.current_text(), 'Old sentence. Another sentence.')
+        self.now = 3
+        self.assertEqual(r.add_final('Hi.'), 'Old sentence. Another sentence.\nHi.')
+        self.now = 6
+        self.assertEqual(r.update_partial('Welcome'), 'Hi.\nWelcome')
+        self.assertEqual(r.scroll_lines, 1)
+        self.assertEqual(r._open, 'Hi.')  # A preview cannot mutate final history.
+        self.assertEqual(r.update_partial('Welcome back'), 'Hi.\nWelcome back')
+        self.assertEqual(r.scroll_lines, 0)
+        self.now = 10  # A delayed confirmation belongs to the same hypothesis.
+        self.assertEqual(r.add_final('Welcome back'), 'Hi.\nWelcome back')
+        self.assertEqual(r.scroll_lines, 0)
+        self.assertEqual(r.add_final('everyone'), 'Hi.\nWelcome back everyone')
+
+    def test_outstanding_partial_does_not_split_due_to_delayed_correction_or_final(self):
+        r = self.renderer()
+        r.add_final('Hi')
+        self.now = .1
+        r.update_partial('there')
+        self.now = 4
+        self.assertEqual(r.update_partial('everyone'), 'Hi everyone')
+        self.now = 8
+        self.assertEqual(r.add_final('everyone'), 'Hi everyone')
+        self.now = 11
+        self.assertEqual(r.add_final('Welcome back'), 'Hi everyone\nWelcome back')
+
+    def test_empty_updates_do_not_restart_clock_or_create_blank_lines(self):
+        r = self.renderer()
+        r.add_final('Hi')
+        self.now = 1.5
+        self.assertEqual(r.update_partial(''), 'Hi')
+        self.assertEqual(r.add_final(''), 'Hi')
+        self.now = 2
+        self.assertEqual(r.update_partial('Welcome'), 'Hi\nWelcome')
+        self.assertEqual(r.update_partial(''), 'Hi')
+        self.assertEqual(r.update_partial('Welcome back'), 'Hi\nWelcome back')
+        self.assertEqual(r.add_final(''), 'Hi')
+        self.assertEqual(r.current_text(), 'Hi')
+        self.assertEqual(r.add_final('Again'), 'Hi\nAgain')
+
+    def test_reset_and_layout_change_clear_timing_history(self):
+        r = self.renderer()
+        for reset in (r.reset, lambda: r.set_layout(TextLayout(40))):
+            r.add_final('Old')
+            self.now += 10
+            reset()
+            self.assertEqual(r.add_final('Fresh'), 'Fresh')
+            self.assertEqual(r.add_final('words'), 'Fresh words')
+
+    def test_single_line_and_bounded_history_after_many_pauses(self):
+        for lines in (1, 2):
+            r = self.renderer(lines=lines)
+            for i in range(100):
+                self.now += 3
+                r.add_final('word' + str(i))
+            self.assertEqual(r.current_text(), 'word99' if lines == 1 else 'word98\nword99')
+            self.assertLessEqual(len(r._closed), lines - 1)
+
+    def test_invalid_pause_setting_rejected_by_schema_and_direct_renderer(self):
+        from live_caption.config import resolve_config
+        for value in (-1, True, None, 'invalid', float('nan'), float('inf')):
+            config = {'bbc': {'pause_threshold_seconds': value}}
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'bbc.pause_threshold_seconds'):
+                    resolve_config(config)
+                with self.assertRaisesRegex(ValueError, 'bbc.pause_threshold_seconds'):
+                    LiveRenderer(config)
+        self.assertEqual(LiveRenderer({}).pause_threshold_seconds, 2.0)
+
+
 if __name__ == '__main__':
     unittest.main()

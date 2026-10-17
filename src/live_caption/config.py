@@ -5,6 +5,7 @@ import math
 import yaml
 
 from .vocabulary import load_vocabulary, validate_vocabulary
+from .renderers.live import pause_threshold_seconds
 
 
 DEFAULT_CONFIG = {
@@ -107,6 +108,7 @@ def resolve_config(user_config: dict | None = None) -> dict:
         words = profanity[key]
         if not isinstance(words, list) or any(not isinstance(w, str) or not w.strip() for w in words):
             raise ValueError(f"processing.profanity.{key} must be a list of non-empty strings")
+    pause_threshold_seconds(config.get("bbc", {}))
     overlay = config.get("overlay", {})
     for key in ("width_fraction", "max_width"):
         if key in overlay:

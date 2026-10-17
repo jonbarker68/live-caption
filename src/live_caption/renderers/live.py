@@ -3,6 +3,7 @@ from collections import deque
 from dataclasses import dataclass
 import math
 import re
+import time
 from typing import Callable
 
 
@@ -29,6 +30,18 @@ class TextLayout:
         return size <= self.width
 
 
+def pause_threshold_seconds(settings):
+    """Validate the shared BBC live pause setting, including direct callers."""
+    value = settings.get('pause_threshold_seconds', 2.0)
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError):
+        raise ValueError('bbc.pause_threshold_seconds must be non-negative and finite') from None
+    if isinstance(value, bool) or not math.isfinite(threshold) or threshold < 0:
+        raise ValueError('bbc.pause_threshold_seconds must be non-negative and finite')
+    return threshold
+
+
 class LiveRenderer:
     """Keep final line breaks stable; allow the current partial to be revised.
 
@@ -37,8 +50,10 @@ class LiveRenderer:
     Only the last ``lines`` lines are displayed. Older committed lines are
     discarded, so memory does not grow with the duration of the session.
     """
-    def __init__(self, config, *, layout=None):
+    def __init__(self, config, *, layout=None, clock=None):
         settings = config.get('bbc', {})
+        self.pause_threshold_seconds = pause_threshold_seconds(settings)
+        self._clock = time.monotonic if clock is None else clock
         self.lines = int(settings.get('lines', 2))
         if self.lines <= 0:
             raise ValueError('bbc.lines must be greater than zero')
@@ -55,6 +70,9 @@ class LiveRenderer:
         self._display_top = 0
         self._last_display = ''
         self.scroll_lines = 0
+        self._last_activity = None
+        self._pending_partial = False
+        self._pause_break = False
 
     def set_layout(self, layout):
         """Replace font/width measurements and reset; old speech is not replayed."""
@@ -74,8 +92,12 @@ class LiveRenderer:
             return False
         return True
 
-    def _append(self, closed, current, text, *, final=False):
+    def _append(self, closed, current, text, *, final=False, break_before=False):
         breaks = 0
+        if break_before and current and text.strip():
+            closed.append(current)
+            current = ''
+            breaks += 1
         for index, word in enumerate(text.split()):
             # The prefix is committed. Punctuation added within a partial
             # is provisional and must not trigger an editorial break yet.
@@ -110,9 +132,26 @@ class LiveRenderer:
                     current += char
         return current, breaks
 
+    def _pause_before(self, text):
+        # Receipt time approximates a pause without changing the string-based
+        # renderer interface. Never split an outstanding provisional hypothesis
+        # from its corrections or final confirmation. Empty/omitted updates do
+        # not count as new speech or consume a pending boundary.
+        if not text.strip():
+            return False
+        now = self._clock()
+        if (self.pause_threshold_seconds > 0 and self._open
+                and not self._pending_partial and self._last_activity is not None
+                and now - self._last_activity >= self.pause_threshold_seconds):
+            self._pause_break = True
+        self._last_activity = now
+        return self._pause_break
+
     def update_partial(self, text):
+        break_before = self._pause_before(text)
+        self._pending_partial = bool(text.strip())
         closed = deque(self._closed, maxlen=self.lines)
-        tail, added = self._append(closed, self._open, text)
+        tail, added = self._append(closed, self._open, text, break_before=break_before)
         self.partial_text = self._visible(closed, tail)
         self._publish(self.partial_text, self._committed_breaks + added, bool(tail))
         self._has_partial = True
@@ -122,7 +161,12 @@ class LiveRenderer:
         return '\n'.join([*closed, *([tail] if tail else [])][-self.lines:])
 
     def add_final(self, text):
-        self._open, added = self._append(self._closed, self._open, text, final=True)
+        break_before = self._pause_before(text)
+        self._open, added = self._append(self._closed, self._open, text, final=True,
+                                         break_before=break_before)
+        self._pending_partial = False
+        if text.strip():
+            self._pause_break = False
         self._committed_breaks += added
         self.partial_text = ''
         self._has_partial = False

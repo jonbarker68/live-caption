@@ -207,3 +207,32 @@ reuse of an identical dictionary benefits from server-side caching. See the
 ```sh
 uv run live-caption --config ./config.yaml --vocabulary ./vocabulary.yaml
 ```
+
+## Start a fresh caption line after a pause
+
+In `bbc_live`, speech arriving after a pause starts on a fresh line even if the
+previous committed line is shorter than half the caption width or has no full
+stop. The default threshold is two seconds. Configure it in the shared caption
+YAML and restart either app:
+
+```yaml
+bbc:
+  pause_threshold_seconds: 2.0  # seconds; 0 disables pause-based breaks
+```
+
+The break appears when speech resumes, rather than inserting blank lines while
+the speaker is silent. For example, `Hi.` followed by a three-second pause and
+`Welcome back` displays as `Hi.` then `Welcome back` on separate lines. Normal
+wrapping and the existing half-width/full-stop rule still apply.
+
+The renderer measures the gap between non-empty caption updates using a
+monotonic clock; this approximates speech pauses and includes recognition/network
+delays. It does not use audio silence detection. Corrections and finalisation of
+an outstanding partial stay with that hypothesis even if delayed; a pause break
+previewed by a partial is committed only by its final. Empty/profanity-only
+updates create no blank lines. Caption resets and font/width changes clear timing
+history. The existing one-line scroll animation is used when the viewport moves.
+
+This is implemented once in live-caption's shared renderer, so Cadenza uses the
+same setting automatically. Legacy `bbc` and `rolling` layouts are unchanged.
+Cadenza's existing eight-second caption expiry still clears very old text.

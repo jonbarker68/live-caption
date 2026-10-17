@@ -14,5 +14,6 @@ overlay:
   alignment: left
   scroll_duration_ms: 180
 bbc:
+  pause_threshold_seconds: 2.0  # 0 disables a fresh line after a pause
   lines: 2
   line_width: 36
