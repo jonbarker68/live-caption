@@ -11,6 +11,9 @@ from AppKit import (
     NSColor,
     NSFont,
     NSFontAttributeName,
+    NSForegroundColorAttributeName,
+    NSParagraphStyleAttributeName,
+    NSMutableParagraphStyle,
     NSLayoutManager,
     NSLineBreakByClipping,
     NSMakeRect,
@@ -32,9 +35,10 @@ from AppKit import (
     NSWindowStyleMaskBorderless,
     NSWindowStyleMaskNonactivatingPanel,
 )
-from Foundation import NSObject, NSTimer, NSString
+from Foundation import NSObject, NSTimer, NSString, NSMutableAttributedString
 
 from .renderers import make_renderer, TextLayout
+from .speakers import CaptionText, SpeakerStyle
 
 DEFAULT_OVERLAY_CONFIG = {
     "mode": "overlay",
@@ -76,6 +80,11 @@ def _overlay_config(config: dict) -> dict:
     values.update(config.get("overlay", {}))
     # Renderer settings live beside overlay in the full configuration.
     values["bbc"] = dict(config.get("bbc", {}))
+    values["speakers"] = dict(SpeakerStyle(config.get("speakers")).settings)
+    values["speaker_available"] = config.get("speaker_available",
+        config.get("speechmatics", {}).get("diarization", "none") in ("speaker", "channel_and_speaker"))
+    if not values["speaker_available"] or values["layout"] != "bbc_live":
+        values["speakers"]["mode"] = "white"
     if values["layout"] == "bbc_live" and "alignment" not in config.get("overlay", {}):
         values["alignment"] = "left"
 
@@ -185,6 +194,7 @@ class AppDelegate(NSObject):
     hide_on_stop = objc.ivar(type=objc._C_BOOL)
     settle_until = objc.ivar(type=objc._C_DBL)
     quit_deadline = objc.ivar(type=objc._C_DBL)
+    speaker_item = objc.ivar()
 
     def initWithSessionFactory_config_(self, session_factory, config):
         self = objc.super(AppDelegate, self).init()
@@ -235,6 +245,13 @@ class AppDelegate(NSObject):
         self.toggle_item.setTarget_(self)
         menu.addItem_(self.toggle_item)
 
+        self.speaker_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Speaker colours", "toggleSpeakerColours:", "")
+        self.speaker_item.setTarget_(self)
+        self.speaker_item.setEnabled_(bool(self.config["speaker_available"] and self.config["layout"] == "bbc_live"))
+        self.speaker_item.setState_(int(self.config["speakers"]["mode"] == "speakers"))
+        menu.setAutoenablesItems_(False)
+        menu.addItem_(self.speaker_item)
         menu.addItem_(NSMenuItem.separatorItem())
 
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -384,10 +401,42 @@ class AppDelegate(NSObject):
             self.content.addSubview_(self.label)
         self.panel.setContentView_(self.content)
 
+    @objc.IBAction
+    def toggleSpeakerColours_(self, sender):
+        if not self.config["speaker_available"] or self.config["layout"] != "bbc_live":
+            return
+        enabled = self.config["speakers"]["mode"] != "speakers"
+        self.config["speakers"]["mode"] = "speakers" if enabled else "white"
+        self.speaker_item.setState_(int(enabled))
+        if self.renderer is not None:
+            self.renderer.set_speaker_mode(enabled)
+        self._finish_scroll()
+        self.last_caption = ''
+        self._show_caption('')
+
+    @objc.python_method
+    def _set_caption_value(self, text):
+        if self.config["speakers"]["mode"] != "speakers":
+            self.label.setStringValue_(str(text))
+            return
+        style = SpeakerStyle(self.config["speakers"])
+        paragraph = NSMutableParagraphStyle.alloc().init()
+        paragraph.setAlignment_(self.label.alignment())
+        paragraph.setLineBreakMode_(NSLineBreakByClipping)
+        attributed = NSMutableAttributedString.alloc().initWithString_attributes_(str(text), {
+            NSFontAttributeName: self.label.font(), NSParagraphStyleAttributeName: paragraph})
+        offset = 0
+        for run in CaptionText(text).runs():
+            length = len(run["text"].encode('utf-16-le')) // 2
+            attributed.addAttribute_value_range_(NSForegroundColorAttributeName,
+                _hex_color(style.colour(run["speaker"])), (offset, length))
+            offset += length
+        self.label.setAttributedStringValue_(attributed)
+
     @objc.python_method
     def _show_caption(self, text: str, scroll_lines=0):
         text = text or "Listening…"
-        old_lines = self.last_caption.splitlines()
+        old_lines = CaptionText(self.last_caption).split("\n") if self.last_caption else []
         new_lines = text.splitlines()
         duration = self.config["scroll_duration_ms"] / 1000.0
         if self.scroll_state is not None:
@@ -397,22 +446,22 @@ class AppDelegate(NSObject):
             state = self.scroll_state
             if not scroll_lines and new_lines and state['target'].splitlines()[0] == new_lines[0]:
                 state['target'] = text
-                self.label.setStringValue_(state['outgoing'] + '\n' + text)
+                self._set_caption_value(state['outgoing'] + '\n' + text)
                 self.last_caption = text
                 return
             self._finish_scroll()
-            self.label.setStringValue_(text)
+            self._set_caption_value(text)
             self.last_caption = text
             return
         if self.scroll_view is not None and duration and scroll_lines == 1 and old_lines:
             self.scroll_state = dict(start=time.monotonic(), duration=duration,
                                      outgoing=old_lines[0], target=text)
             self.label.setMaximumNumberOfLines_(int(self.config['bbc'].get('lines', 2)) + 1)
-            self.label.setStringValue_(old_lines[0] + '\n' + text)
+            self._set_caption_value(old_lines[0] + '\n' + text)
             self.last_caption = text
             self._advance_scroll(self.scroll_state['start'])
         else:
-            self.label.setStringValue_(text)
+            self._set_caption_value(text)
             self.last_caption = text
 
     @objc.python_method
@@ -437,7 +486,7 @@ class AppDelegate(NSObject):
         self.scroll_state = None
         self.label.setFrame_(self.scroll_view.bounds())
         self.label.setMaximumNumberOfLines_(int(self.config['bbc'].get('lines', 2)))
-        self.label.setStringValue_(text)
+        self._set_caption_value(text)
 
     def _create_renderer(self):
         layout = None
@@ -466,7 +515,7 @@ class AppDelegate(NSObject):
         self.stopping = False
         self.hide_on_stop = True
         self.settle_until = 0.0
-        self.label.setStringValue_("Starting…")
+        self._set_caption_value("Starting…")
         self.panel.orderFrontRegardless()
         self._set_toggle_state()
 
@@ -538,12 +587,12 @@ class AppDelegate(NSObject):
                         and self.renderer is not None
                         and not self.renderer.current_text()
                     ):
-                        self.label.setStringValue_(text)
+                        self._set_caption_value(text)
 
                 elif kind == "error":
                     print(f"Live caption error: {text}", flush=True)
                     self._finish_scroll()
-                    self.label.setStringValue_(f"Live caption error: {text}")
+                    self._set_caption_value(f"Live caption error: {text}")
                     self.stop_captioning(hide_overlay=False)
 
                 elif kind == "pipeline_stopped":

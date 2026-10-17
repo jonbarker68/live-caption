@@ -6,6 +6,8 @@ import re
 import time
 from typing import Callable
 
+from ..speakers import CaptionText, SpeakerStyle, join_captions
+
 
 @dataclass(frozen=True)
 class TextLayout:
@@ -52,6 +54,8 @@ class LiveRenderer:
     """
     def __init__(self, config, *, layout=None, clock=None):
         settings = config.get('bbc', {})
+        self.style = SpeakerStyle(config.get("speakers"))
+        self.speaker_mode = self.style.settings["mode"] == "speakers"
         self.pause_threshold_seconds = pause_threshold_seconds(settings)
         self._clock = time.monotonic if clock is None else clock
         self.lines = int(settings.get('lines', 2))
@@ -63,7 +67,7 @@ class LiveRenderer:
     def reset(self):
         """Discard all displayed, committed and provisional text."""
         self._closed = deque(maxlen=max(0, self.lines - 1))
-        self._open = ''
+        self._open = CaptionText()
         self.partial_text = ''
         self._has_partial = False
         self._committed_breaks = 0
@@ -73,6 +77,13 @@ class LiveRenderer:
         self._last_activity = None
         self._pending_partial = False
         self._pause_break = False
+
+    def set_speaker_mode(self, enabled):
+        """Change display policy without restarting recognition; clear old text."""
+        enabled = bool(enabled)
+        if self.speaker_mode != enabled:
+            self.speaker_mode = enabled
+            self.reset()
 
     def set_layout(self, layout):
         """Replace font/width measurements and reset; old speech is not replayed."""
@@ -98,7 +109,13 @@ class LiveRenderer:
             closed.append(current)
             current = ''
             breaks += 1
-        for index, word in enumerate(text.split()):
+        for index, word in enumerate(CaptionText(text).split()):
+            previous = next((owner for owner in reversed(CaptionText(current).owners) if owner), None)
+            speaker = next((owner for owner in word.owners if owner), None)
+            if self.speaker_mode and current and previous and speaker and previous != speaker:
+                closed.append(current)
+                breaks += 1
+                current = CaptionText()
             # The prefix is committed. Punctuation added within a partial
             # is provisional and must not trigger an editorial break yet.
             # Wait for the following word so a completed sentence alone
@@ -108,7 +125,7 @@ class LiveRenderer:
                 closed.append(current)
                 breaks += 1
                 current = ''
-            candidate = f'{current} {word}' if current else word
+            candidate = CaptionText(current) + ' ' + word if current else word
             if self.layout.fits(candidate):
                 current = candidate
                 continue
@@ -121,7 +138,8 @@ class LiveRenderer:
                 continue
             # Extremely long tokens must also fit at the fixed font size.
             # Split only when a whole token cannot fit on an empty line.
-            for char in word:
+            for char_index in range(len(word)):
+                char = word[char_index:char_index + 1]
                 if not self.layout.fits(char):
                     raise ValueError('Caption region is too narrow for a character')
                 if not self.layout.fits(current + char):
@@ -158,7 +176,7 @@ class LiveRenderer:
         return self.current_text()
 
     def _visible(self, closed, tail):
-        return '\n'.join([*closed, *([tail] if tail else [])][-self.lines:])
+        return join_captions('\n', [*closed, *([tail] if tail else [])][-self.lines:])
 
     def add_final(self, text):
         break_before = self._pause_before(text)

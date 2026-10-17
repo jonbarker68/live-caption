@@ -286,6 +286,9 @@ class SpeechmaticsWorker(threading.Thread):
             chunk_size=AUDIO_CHUNK_SIZE,
         )
 
+        # Disabled sessions do no speaker estimation and send no speaker options.
+        if config_values.get("diarization", "none") == "none":
+            config_values.pop("speaker_diarization_config", None)
         transcription_config = TranscriptionConfig(**config_values)
 
         recorder = None

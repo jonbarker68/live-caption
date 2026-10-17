@@ -94,3 +94,39 @@ class NativeLayoutTests(unittest.TestCase):
         for value in (-1, 1001, float('nan'), float('inf'), True):
             with self.assertRaises(ValueError):
                 _overlay_config({'overlay': {'scroll_duration_ms': value}})
+
+
+@unittest.skipUnless(sys.platform == 'darwin', 'Native overlay requires macOS')
+class NativeSpeakerTests(unittest.TestCase):
+    def test_attributed_colours_scrolling_unicode_and_mode_switch(self):
+        from unittest.mock import Mock
+        from AppKit import NSApplication, NSForegroundColorAttributeName
+        from live_caption.overlay import AppDelegate, _hex_color
+        from live_caption.speakers import CaptionText
+        NSApplication.sharedApplication()
+        d = AppDelegate.alloc().initWithSessionFactory_config_(lambda: None, {
+            'speechmatics': {'diarization': 'speaker'}, 'speakers': {'mode': 'speakers'},
+            'overlay': {'layout': 'bbc_live'}})
+        d._create_overlay()
+        d.renderer = d._create_renderer()
+        d.speaker_item = Mock()
+        try:
+            text = CaptionText('🎶Hello\nWorld', ['S1'] * 6 + [None] + ['S2'] * 5)
+            d._show_caption(text)
+            value = d.label.attributedStringValue()
+            self.assertEqual(value.string(), text)
+            # Foundation offsets use UTF-16, including the two-unit emoji.
+            colour, span = value.attribute_atIndex_effectiveRange_(NSForegroundColorAttributeName, 8, None)
+            self.assertEqual(colour, _hex_color('#FFE066'))
+            incoming = CaptionText('World\nNext', ['S2'] * 5 + [None] + ['S3'] * 4)
+            d._show_caption(incoming, 1)
+            d._finish_scroll()
+            colour, span = d.label.attributedStringValue().attribute_atIndex_effectiveRange_(
+                NSForegroundColorAttributeName, 0, None)
+            self.assertEqual(colour, _hex_color('#FFE066'))
+            d.toggleSpeakerColours_(None)
+            self.assertEqual(d.config['speakers']['mode'], 'white')
+            self.assertFalse(d.renderer.speaker_mode)
+            self.assertEqual(d.renderer.current_text(), '')
+        finally:
+            d.panel.orderOut_(None)

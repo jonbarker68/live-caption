@@ -6,15 +6,18 @@ import yaml
 
 from .vocabulary import load_vocabulary, validate_vocabulary
 from .renderers.live import pause_threshold_seconds
+from .speakers import DEFAULT_SPEAKERS, SpeakerStyle
 
 
 DEFAULT_CONFIG = {
     "speechmatics": {
         "model": "enhanced",
+        "diarization": "none",
         "language": "en",
         "max_delay": 0.7,
         "enable_partials": True,
     },
+    "speakers": DEFAULT_SPEAKERS,
     "processing": {
         "profanity": {
             "mode": "omit",
@@ -35,7 +38,7 @@ def _merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config(path, *, vocabulary_file=None) -> dict:
+def load_config(path, *, vocabulary_file=None, diarization=None, speaker_colours=None) -> dict:
     """Resolve shared config and vocabulary, with an optional CLI file override.
 
     Configured vocabulary paths are relative to this YAML file. A CLI override
@@ -54,6 +57,10 @@ def load_config(path, *, vocabulary_file=None) -> dict:
     if not isinstance(user_config, dict):
         raise ValueError("Top-level config must be a YAML mapping")
 
+    if diarization is not None:
+        user_config.setdefault("speechmatics", {})["diarization"] = diarization
+    if speaker_colours is not None:
+        user_config.setdefault("speakers", {})["mode"] = speaker_colours
     config = resolve_config(user_config)
     selected = vocabulary_file if vocabulary_file is not None else config.get("vocabulary_file")
     if selected is not None:
@@ -82,10 +89,26 @@ def resolve_config(user_config: dict | None = None) -> dict:
         user_config = {}
     if not isinstance(user_config, dict):
         raise ValueError("Top-level config must be a YAML mapping")
-    for section in ("speechmatics", "processing", "overlay", "bbc", "audio"):
+    for section in ("speechmatics", "processing", "overlay", "bbc", "audio", "speakers"):
         if section in user_config and not isinstance(user_config[section], dict):
             raise ValueError(f"{section} must be a mapping")
     config = _merge(DEFAULT_CONFIG, user_config)
+    SpeakerStyle(config["speakers"])
+    if config["speechmatics"]["diarization"] not in ("none", "speaker", "channel", "channel_and_speaker"):
+        raise ValueError("speechmatics.diarization must be none, speaker, channel or channel_and_speaker")
+    diarization = config["speechmatics"].get("speaker_diarization_config", {})
+    if not isinstance(diarization, dict):
+        raise ValueError("speechmatics.speaker_diarization_config must be a mapping")
+    if "max_speakers" in diarization:
+        value = diarization["max_speakers"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 2:
+            raise ValueError("speaker_diarization_config.max_speakers must be an integer >= 2")
+    if "prefer_current_speaker" in diarization and not isinstance(diarization["prefer_current_speaker"], bool):
+        raise ValueError("speaker_diarization_config.prefer_current_speaker must be true or false")
+    if "speaker_sensitivity" in diarization:
+        value = diarization["speaker_sensitivity"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise ValueError("speaker_diarization_config.speaker_sensitivity must be between 0 and 1")
     if "additional_vocab" in config["speechmatics"]:
         config["speechmatics"]["additional_vocab"] = validate_vocabulary(
             config["speechmatics"]["additional_vocab"]

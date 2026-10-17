@@ -236,3 +236,61 @@ history. The existing one-line scroll animation is used when the viewport moves.
 This is implemented once in live-caption's shared renderer, so Cadenza uses the
 same setting automatically. Legacy `bbc` and `rolling` layouts are unchanged.
 Cadenza's existing eight-second caption expiry still clears very old text.
+
+## Optional speaker colours for discussions
+
+Speaker estimation (Speechmatics diarization) and displaying speaker colours are
+independent settings. Estimation is **off by default**, and ordinary captions
+remain white. Set session options in your existing caption YAML:
+
+```yaml
+speechmatics:
+  diarization: speaker  # none disables estimation; default: none
+  speaker_diarization_config:
+    prefer_current_speaker: true
+    # max_speakers: 3  # optional; counts EVERY speaker in the session, not just the panel
+speakers:
+  mode: white          # white or speakers; display default
+  colours: ["#FFFFFF", "#FFE066", "#77DDF5", "#FFB3D9", "#A9E88B"]
+  unknown_colour: "#FFFFFF"
+```
+
+Both CLIs accept `--diarization none|speaker` and `--speaker-colours white|speakers`;
+these override the corresponding config fields at startup. For an event without
+a panel, omit these settings or explicitly select `--diarization none`. For an
+event with a panel, start estimation from the beginning but keep the display
+white until the discussion. Changing estimation requires a new recognition
+session; changing display mode does not restart recognition.
+
+Speaker colours require `bbc_live`. Legacy `bbc` and `rolling` remain plain.
+Confirmed words retain their individual speaker labels through profanity omission,
+wrapping and scrolling. A confirmed speaker change starts a fresh line in colour
+mode. Partials and unknown (`UU`/missing) labels stay neutral; a final can correct
+a provisional line break. Such corrections snap rather than queueing scrolling.
+The display toggle clears caption history so existing passages are not recoloured
+or replayed. Font, measured width, line count and pause breaks keep their meanings.
+
+IDs such as S1/S2/S3 map directly to palette positions, so a slide change, caption
+expiry or display-mode reset does not change a known ID's colour. Additional IDs
+cycle through the palette. IDs are anonymous estimates, not names, and a new
+recognition session may assign them differently. Speaker identification accuracy
+needs rehearsal with the venue audio, especially similar voices and interruptions.
+No local voice model is run. Speaker labels are retained in raw recordings and
+can be replayed; older recordings without labels continue working neutrally.
+
+Parsing, filtering, colours, speaker-turn layout and structured caption data are
+implemented once in live-caption. The AppKit overlay and Cadenza Qt view only
+apply those shared colours to their native text controls. Caption text is escaped
+before Qt styled-text rendering. The existing JSON bridge `kind`/`text` fields
+remain, with an additional `runs` list carrying text and speaker labels.
+
+Start an event that might include a panel:
+
+```sh
+uv run live-caption --layout bbc_live --diarization speaker
+```
+
+Use **Speaker colours** in the CC menu to toggle white/coloured captions. The
+control is unavailable if estimation was disabled or a legacy layout is selected.
+To start with colours visible, add `--speaker-colours speakers`. Replay also
+allows the display toggle, using any speaker labels present in the recording.

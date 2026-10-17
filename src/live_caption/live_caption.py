@@ -53,6 +53,10 @@ def parse_args(argv=None):
         "--vocabulary", "--vocabulary-file", metavar="FILE",
         help="YAML vocabulary file; overrides vocabulary_file in config (relative to current directory)",
     )
+    parser.add_argument("--diarization", choices=("none", "speaker"),
+                        help="Speaker estimation at session startup (default: config, otherwise none)")
+    parser.add_argument("--speaker-colours", choices=("white", "speakers"),
+                        help="Caption display policy (default: config, otherwise white)")
     parser.add_argument(
         "--speed",
         type=float,
@@ -77,9 +81,11 @@ def main():
     args = parse_args()
     config_path = args.config or _default_config_path()
     try:
-        config = load_config(config_path, vocabulary_file=args.vocabulary)
+        config = load_config(config_path, vocabulary_file=args.vocabulary,
+                             diarization=args.diarization, speaker_colours=args.speaker_colours)
     except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         raise SystemExit(f"Invalid caption configuration: {exc}") from exc
+    config["speaker_available"] = bool(args.replay) or config["speechmatics"]["diarization"] in ("speaker", "channel_and_speaker")
     if args.layout:
         config.setdefault("overlay", {})["layout"] = args.layout
 

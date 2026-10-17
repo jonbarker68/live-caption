@@ -3,6 +3,7 @@ import threading
 
 from .events import RawASREvent
 from .config import resolve_config
+from .speakers import caption_from_event, caption_sub, join_captions
 
 
 def _find_profanities(value):
@@ -55,7 +56,7 @@ class CaptionProcessor:
     def process(self, event: RawASREvent):
         if event.kind not in {"partial", "final"}:
             return None
-        text = event.text
+        text = caption_from_event(event)
         if self.mode == "omit" and text:
             words = self.words | {_normalise_word(w) for w in _find_profanities(event.payload)}
             words -= self.allowed
@@ -64,12 +65,12 @@ class CaptionProcessor:
                 # attached punctuation so omitted-only utterances leave no marks.
                 terms = "|".join(re.escape(w).replace("'", "['’]") for w in sorted(words, key=len, reverse=True))
                 pattern = rf"(?<!\w)(?:{terms})(?:['’]s)?(?!\w)[,;:.!?]*"
-                filtered = re.sub(pattern, "", text, flags=re.IGNORECASE)
+                filtered = caption_sub(pattern, "", text, flags=re.IGNORECASE)
                 if filtered != text:
-                    text = " ".join(filtered.split())
-                    text = re.sub(r"\s+([,;:.!?])", r"\1", text)
-                    text = re.sub(r"[\(\[\{\"'“‘]\s*[\)\]\}\"'”’]", "", text)
-                    text = " ".join(text.split())
+                    text = join_captions(" ", filtered.split())
+                    text = caption_sub(r"\s+([,;:.!?])", r"\1", text)
+                    text = caption_sub(r"[\(\[\{\"'“‘]\s*[\)\]\}\"'”’]", "", text)
+                    text = join_captions(" ", text.split())
                     if not any(c.isalnum() for c in text):
                         text = ""
         # Empty updates are meaningful: clear a provisional hypothesis even

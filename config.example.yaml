@@ -17,3 +17,13 @@ bbc:
   pause_threshold_seconds: 2.0  # 0 disables a fresh line after a pause
   lines: 2
   line_width: 36
+
+# Recognition is off by default; enable for events with panel discussions.
+speechmatics:
+  diarization: none  # speaker to enable; CLI --diarization overrides
+  speaker_diarization_config:
+    prefer_current_speaker: true
+speakers:
+  mode: white  # white or speakers; CLI --speaker-colours overrides
+  colours: ["#FFFFFF", "#FFE066", "#77DDF5", "#FFB3D9", "#A9E88B"]
+  unknown_colour: "#FFFFFF"
