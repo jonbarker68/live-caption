@@ -1,3 +1,6 @@
+# Vocabulary paths are relative to this configuration file. CLI --vocabulary overrides.
+vocabulary_file: vocabulary.yaml
+
 # Caption settings use live_caption.config's shared schema.
 # Merge this section into existing audio, Speechmatics and layout settings.
 processing:

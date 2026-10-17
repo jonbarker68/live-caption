@@ -4,6 +4,8 @@ import math
 
 import yaml
 
+from .vocabulary import load_vocabulary, validate_vocabulary
+
 
 DEFAULT_CONFIG = {
     "speechmatics": {
@@ -32,9 +34,13 @@ def _merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config(path) -> dict:
-    """Load YAML config, applying defaults for omitted settings."""
-    path = Path(path)
+def load_config(path, *, vocabulary_file=None) -> dict:
+    """Resolve shared config and vocabulary, with an optional CLI file override.
+
+    Configured vocabulary paths are relative to this YAML file. A CLI override
+    is relative to the current working directory. No implicit file is loaded.
+    """
+    path = Path(path).expanduser().resolve()
 
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
@@ -47,7 +53,22 @@ def load_config(path) -> dict:
     if not isinstance(user_config, dict):
         raise ValueError("Top-level config must be a YAML mapping")
 
-    return resolve_config(user_config)
+    config = resolve_config(user_config)
+    selected = vocabulary_file if vocabulary_file is not None else config.get("vocabulary_file")
+    if selected is not None:
+        if not isinstance(selected, (str, Path)) or not str(selected).strip():
+            raise ValueError("vocabulary_file must be a non-empty path or null")
+        selected = Path(selected).expanduser()
+        if vocabulary_file is None and not selected.is_absolute():
+            selected = path.parent / selected
+        selected = selected.resolve()
+        entries = load_vocabulary(selected)
+        config["speechmatics"]["additional_vocab"] = validate_vocabulary(
+            config["speechmatics"].get("additional_vocab", []) + entries,
+            source="Combined speechmatics.additional_vocab and vocabulary file",
+        )
+        config["vocabulary_file"] = str(selected)
+    return config
 
 
 def resolve_config(user_config: dict | None = None) -> dict:
@@ -64,6 +85,10 @@ def resolve_config(user_config: dict | None = None) -> dict:
         if section in user_config and not isinstance(user_config[section], dict):
             raise ValueError(f"{section} must be a mapping")
     config = _merge(DEFAULT_CONFIG, user_config)
+    if "additional_vocab" in config["speechmatics"]:
+        config["speechmatics"]["additional_vocab"] = validate_vocabulary(
+            config["speechmatics"]["additional_vocab"]
+        )
     processing = config["processing"]
     if "profanity_filter" in processing:
         if not isinstance(processing["profanity_filter"], bool):

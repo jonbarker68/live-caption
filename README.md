@@ -157,3 +157,53 @@ See `config.example.yaml` for a credential-free example. To share one local file
 ```sh
 uv run live-caption --config ~/.config/live-caption/config.yaml
 ```
+
+## Shared ASR vocabulary file
+
+The shared loader in `live_caption.vocabulary` accepts a UTF-8 YAML list:
+
+```yaml
+- Cadenza
+- content: Stoller Hall
+- content: Camerata
+# Optional pronunciation hints (Speechmatics' example):
+- content: gnocchi
+  sounds_like: [nyohki, nokey]
+```
+
+Use `content` for the spelling to display. Omit `sounds_like` to let Speechmatics
+infer pronunciation. An empty file or `[]` supplies no extra words.
+
+Set the top-level `vocabulary_file` in your existing caption configuration:
+
+```yaml
+vocabulary_file: /Users/jon/projects/live-caption/vocabulary.yaml
+```
+
+Config paths resolve relative to the containing config file; `~` is expanded.
+A CLI `--vocabulary FILE` (alias `--vocabulary-file`) overrides this path and
+resolves relative to the launch directory. No file is loaded implicitly: omit
+the setting or set it to `null` to use only inline vocabulary/default ASR.
+Both apps use the same live-caption loader, validator and Speechmatics worker.
+Cadenza passes the CLI override through to its caption subprocess.
+
+Existing `speechmatics.additional_vocab` entries are combined with the file's
+entries (inline first), with exact duplicates removed. Different pronunciation
+entries are preserved. Files are read at application startup; restart after
+editing. The list is sent as `additional_vocab` when live recognition starts;
+it does not rewrite existing transcripts or affect replayed recognition results,
+caption layout or the profanity filter. Replay still validates configured files.
+
+Missing/malformed files, invalid entries and unsupported entry keys produce a
+startup error with the source filename/entry. Entries and pronunciation hints
+must contain at most six words, each at most 4000 characters; the combined list
+cannot exceed 20,000 entries. Speechmatics recommends no more than 1,000 entries
+for best performance. Large dictionaries can increase session startup time;
+reuse of an identical dictionary benefits from server-side caching. See the
+[Speechmatics custom dictionary documentation](https://docs.speechmatics.com/speech-to-text/features/custom-dictionary).
+
+`vocabulary.yaml` contains a small starter list. For example:
+
+```sh
+uv run live-caption --config ./config.yaml --vocabulary ./vocabulary.yaml
+```

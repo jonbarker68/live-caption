@@ -1,0 +1,5 @@
+# Shared Speechmatics custom dictionary. Use a YAML list, not additional_vocab:.
+# Add pronunciation hints only where needed; leave them out for automatic pronunciation.
+- content: Cadenza
+- content: Stoller Hall
+- content: Camerata

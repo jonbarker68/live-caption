@@ -1,5 +1,6 @@
 import argparse
 import queue
+import yaml
 from pathlib import Path
 
 from .asr import SpeechmaticsWorker
@@ -24,7 +25,7 @@ def _default_config_path():
     return str(candidates[0])
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Live caption overlay")
 
     source = parser.add_mutually_exclusive_group()
@@ -49,6 +50,10 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--vocabulary", "--vocabulary-file", metavar="FILE",
+        help="YAML vocabulary file; overrides vocabulary_file in config (relative to current directory)",
+    )
+    parser.add_argument(
         "--speed",
         type=float,
         default=1.0,
@@ -58,7 +63,7 @@ def parse_args():
     parser.add_argument("--layout", choices=("rolling", "bbc", "bbc_live"),
                         help="override overlay.layout for this run")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.speed <= 0:
         parser.error("--speed must be greater than zero")
@@ -71,7 +76,10 @@ def parse_args():
 def main():
     args = parse_args()
     config_path = args.config or _default_config_path()
-    config = load_config(config_path)
+    try:
+        config = load_config(config_path, vocabulary_file=args.vocabulary)
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        raise SystemExit(f"Invalid caption configuration: {exc}") from exc
     if args.layout:
         config.setdefault("overlay", {})["layout"] = args.layout
 
