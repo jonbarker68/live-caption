@@ -294,3 +294,7 @@ Use **Speaker colours** in the CC menu to toggle white/coloured captions. The
 control is unavailable if estimation was disabled or a legacy layout is selected.
 To start with colours visible, add `--speaker-colours speakers`. Replay also
 allows the display toggle, using any speaker labels present in the recording.
+
+### Audio startup check and muted feeds
+
+Each new transcription session checks for an initial audio signal. Three seconds of digital zeroes before any non-zero audio is received stops startup with an input-check error. Once any non-zero audio has been received, that check is permanently satisfied for the session: intentional mute periods, including long stretches of digital zeroes during music, continue to be transmitted without stopping transcription. Unmute and provide a brief signal when starting or restarting captions. Hardware read failures, authentication errors and connection failures remain errors.

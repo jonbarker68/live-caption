@@ -368,23 +368,28 @@ class SpeechmaticsWorker(threading.Thread):
                 self.display_events.put(("status", "Live"))
 
                 silent_seconds = 0.0
+                input_verified = False
 
                 while not self.stop_requested.is_set():
                     audio = await audio_source.read(chunk_size=audio_format.chunk_size)
 
-                    if any(audio):
-                        silent_seconds = 0.0
-                    else:
-                        silent_seconds += len(audio) / (
-                            BYTES_PER_SAMPLE * audio_format.sample_rate
-                        )
-                        if silent_seconds >= SILENT_MIC_TIMEOUT:
-                            raise RuntimeError(
-                                "Microphone is returning digital silence for "
-                                f"{SILENT_MIC_TIMEOUT:.0f} seconds. Check "
-                                "microphone permission for Live Caption "
-                                "and restart the app if necessary."
+                    # Digital zeroes are expected when the sound engineer
+                    # mutes the feed during music. Validate the input only
+                    # until its first signal, never again in this session.
+                    if not input_verified:
+                        if any(audio):
+                            input_verified = True
+                        else:
+                            silent_seconds += len(audio) / (
+                                BYTES_PER_SAMPLE * audio_format.sample_rate
                             )
+                            if silent_seconds >= SILENT_MIC_TIMEOUT:
+                                raise RuntimeError(
+                                    "Audio startup check: input returned digital silence for "
+                                    f"{SILENT_MIC_TIMEOUT:.0f} seconds before any signal. "
+                                    "Unmute the source and check input routing and microphone "
+                                    "permission, then restart captions."
+                                )
 
                     await client.send_audio(audio)
 
